@@ -15,16 +15,19 @@ import tflib.save_images
 import tflib.cifar10
 import tflib.inception_score
 import tflib.plot
+from tqdm import tqdm
 
 # Download CIFAR-10 (Python version) at
 # https://www.cs.toronto.edu/~kriz/cifar.html and fill in the path to the
 # extracted files here!
-DATA_DIR = ''
+DATA_DIR = 'data/cifar-10-batches-py'
 if len(DATA_DIR) == 0:
     raise Exception('Please specify path to data directory in gan_cifar.py!')
-
+exp_dir_prefix = 'exps/'
 MODE = 'wgan-gp' # Valid options are dcgan, wgan, or wgan-gp
 DIM = 128 # This overfits substantially; you're probably better off with 64
+exp_dir = exp_dir_prefix+'-'+MODE+'-' + '%g'%DIM
+
 LAMBDA = 10 # Gradient penalty lambda hyperparameter
 CRITIC_ITERS = 5 # How many critic iterations per generator iteration
 BATCH_SIZE = 64 # Batch size
@@ -32,6 +35,11 @@ ITERS = 200000 # How many generator iterations to train for
 OUTPUT_DIM = 3072 # Number of pixels in CIFAR10 (3*32*32)
 
 lib.print_model_settings(locals().copy())
+# Dataset iterators
+train_gen, dev_gen = lib.cifar10.load(BATCH_SIZE, data_dir=DATA_DIR)
+
+if not os.path.exists(exp_dir):
+    os.makedirs(exp_dir)
 
 def LeakyReLU(x, alpha=0.2):
     return tf.maximum(alpha*x, x)
@@ -138,15 +146,15 @@ elif MODE == 'wgan-gp':
     disc_train_op = tf.train.AdamOptimizer(learning_rate=1e-4, beta1=0.5, beta2=0.9).minimize(disc_cost, var_list=disc_params)
 
 elif MODE == 'dcgan':
-    gen_cost = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(disc_fake, tf.ones_like(disc_fake)))
-    disc_cost =  tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(disc_fake, tf.zeros_like(disc_fake)))
-    disc_cost += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(disc_real, tf.ones_like(disc_real)))
+    gen_cost = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=disc_fake, labels=tf.ones_like(disc_fake)))
+    disc_cost =  tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=disc_fake, labels=tf.zeros_like(disc_fake)))
+    disc_cost += tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=disc_real, labels=tf.ones_like(disc_real)))
     disc_cost /= 2.
 
     gen_train_op = tf.train.AdamOptimizer(learning_rate=2e-4, beta1=0.5).minimize(gen_cost,
                                                                                   var_list=lib.params_with_name('Generator'))
     disc_train_op = tf.train.AdamOptimizer(learning_rate=2e-4, beta1=0.5).minimize(disc_cost,
-                                                                                   var_list=lib.params_with_name('Discriminator.'))
+                                                                                      var_list=lib.params_with_name('Discriminator.'))
 
 # For generating samples
 fixed_noise_128 = tf.constant(np.random.normal(size=(128, 128)).astype('float32'))
@@ -167,14 +175,13 @@ def get_inception_score():
     all_samples = all_samples.reshape((-1, 3, 32, 32)).transpose(0,2,3,1)
     return lib.inception_score.get_inception_score(list(all_samples))
 
-# Dataset iterators
-train_gen, dev_gen = lib.cifar10.load(BATCH_SIZE, data_dir=DATA_DIR)
 def inf_train_gen():
     while True:
         for images,_ in train_gen():
             yield images
 
 # Train loop
+os.chdir(exp_dir)
 with tf.Session() as session:
     session.run(tf.initialize_all_variables())
     gen = inf_train_gen()
